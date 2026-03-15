@@ -1,0 +1,9 @@
+{
+  "name": "Copy of 15 March backup again from scratch",
+  "description": "AI-powered system for building modular hybrid apps with GitHub automation, automatic APK builds, and live admin dashboards.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
