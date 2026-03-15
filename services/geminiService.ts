@@ -212,19 +212,91 @@ export class GeminiService implements AIProvider {
     return null;
   }
 
+  private sanitizeJsonCandidate(input: string): string {
+    const normalized = input
+      .replace(/^\uFEFF/, '')
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2018\u2019]/g, "'");
+
+    let output = '';
+    let inString = false;
+    let escaped = false;
+
+    for (let i = 0; i < normalized.length; i++) {
+      const ch = normalized[i];
+
+      if (inString) {
+        if (escaped) {
+          output += ch;
+          escaped = false;
+          continue;
+        }
+
+        if (ch === '\\') {
+          output += ch;
+          escaped = true;
+          continue;
+        }
+
+        if (ch === '"') {
+          output += ch;
+          inString = false;
+          continue;
+        }
+
+        if (ch === '\n') {
+          output += '\\n';
+          continue;
+        }
+
+        if (ch === '\r') {
+          output += '\\r';
+          continue;
+        }
+
+        if (ch === '\t') {
+          output += '\\t';
+          continue;
+        }
+
+        if (/[\u0000-\u001F]/.test(ch)) {
+          output += `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`;
+          continue;
+        }
+
+        output += ch;
+        continue;
+      }
+
+      if (ch === '"') {
+        output += ch;
+        inString = true;
+        continue;
+      }
+
+      if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(ch)) {
+        continue;
+      }
+
+      output += ch;
+    }
+
+    return output.replace(/,\s*([}\]])/g, '$1');
+  }
+
   public parseModelJson(rawText: string): any {
     const text = (rawText || '{}').trim();
 
     const tryParse = (str: string) => {
       try {
-        return JSON.parse(str);
+        const firstPass = JSON.parse(str);
+        return typeof firstPass === 'string' ? JSON.parse(firstPass) : firstPass;
       } catch (e) {
-        // Try repairing truncated/broken JSON
-        const fixed = str
-          .replace(/[\u0000-\u001F]/g, ' ')  // remove control characters
-          .replace(/,\s*([}\]])/g, '$1');    // fix trailing commas
+        // Try repairing malformed JSON with common model output issues.
+        const fixed = this.sanitizeJsonCandidate(str);
         try {
-          return JSON.parse(fixed);
+          const secondPass = JSON.parse(fixed);
+          return typeof secondPass === 'string' ? JSON.parse(secondPass) : secondPass;
         } catch (e2) {
           return null;
         }
