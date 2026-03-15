@@ -62,6 +62,7 @@ export const MANDATORY_RULES = `### 🛠 MANDATORY RULES:
 2. **MODULAR CODE ARCHITECTURE:**
    - Break down code into small, manageable files.
    - Folder structure: \`components/\`, \`hooks/\`, \`services/\`, \`utils/\`, \`styles/\`.
+   - **CRITICAL ENTRY POINT:** When generating a new React app, you MUST ALWAYS generate an entry point file (e.g., \`src/main.tsx\` or \`frontend/main.tsx\`) and a root component (e.g., \`src/App.tsx\` or \`frontend/App.tsx\`) that mounts the application and sets up routing. Without these, the app will not render.
 
 3. **ADMIN DASHBOARD POLICY:**
    - DO NOT create an \`admin/\` dashboard by default, even if the app seems to need one (e.g., for multi-user management or inventory).
@@ -213,91 +214,41 @@ export class GeminiService implements AIProvider {
   }
 
   private sanitizeJsonCandidate(input: string): string {
-    const normalized = input
-      .replace(/^\uFEFF/, '')
-      .replace(/[\u201C\u201D]/g, '"')
-      .replace(/[\u2018\u2019]/g, "'");
-
-    let output = '';
-    let inString = false;
-    let escaped = false;
-
-    for (let i = 0; i < normalized.length; i++) {
-      const ch = normalized[i];
-
-      if (inString) {
-        if (escaped) {
-          output += ch;
-          escaped = false;
-          continue;
+    Logger.debug("Sanitizing JSON candidate", { inputLength: input.length });
+    // Replace actual control characters with escaped versions
+    const sanitized = input
+      .replace(/[\u0000-\u001F]/g, (match) => {
+        Logger.debug("Found control character", { charCode: match.charCodeAt(0) });
+        switch (match) {
+          case '\n': return '\\n';
+          case '\r': return '\\r';
+          case '\t': return '\\t';
+          default: return `\\u${match.charCodeAt(0).toString(16).padStart(4, '0')}`;
         }
-
-        if (ch === '\\') {
-          output += ch;
-          escaped = true;
-          continue;
-        }
-
-        if (ch === '"') {
-          output += ch;
-          inString = false;
-          continue;
-        }
-
-        if (ch === '\n') {
-          output += '\\n';
-          continue;
-        }
-
-        if (ch === '\r') {
-          output += '\\r';
-          continue;
-        }
-
-        if (ch === '\t') {
-          output += '\\t';
-          continue;
-        }
-
-        if (/[\u0000-\u001F]/.test(ch)) {
-          output += `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`;
-          continue;
-        }
-
-        output += ch;
-        continue;
-      }
-
-      if (ch === '"') {
-        output += ch;
-        inString = true;
-        continue;
-      }
-
-      if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(ch)) {
-        continue;
-      }
-
-      output += ch;
-    }
-
-    return output.replace(/,\s*([}\]])/g, '$1');
+      })
+      .replace(/,\s*([}\]])/g, '$1');
+    
+    Logger.debug("Sanitization complete", { sanitizedLength: sanitized.length });
+    return sanitized;
   }
 
   public parseModelJson(rawText: string): any {
     const text = (rawText || '{}').trim();
 
     const tryParse = (str: string) => {
+      Logger.debug("Attempting to parse JSON string", { strLength: str.length, preview: str.substring(0, 100) });
       try {
         const firstPass = JSON.parse(str);
         return typeof firstPass === 'string' ? JSON.parse(firstPass) : firstPass;
       } catch (e) {
+        Logger.debug("JSON parsing failed, attempting repair", { str });
         // Try repairing malformed JSON with common model output issues.
         const fixed = this.sanitizeJsonCandidate(str);
         try {
           const secondPass = JSON.parse(fixed);
           return typeof secondPass === 'string' ? JSON.parse(secondPass) : secondPass;
         } catch (e2) {
+          Logger.error("JSON repair failed", e2, { fixed });
           return null;
         }
       }
@@ -315,6 +266,7 @@ export class GeminiService implements AIProvider {
     }
 
     // 3) Parse first syntactically balanced JSON object from mixed text
+    // This handles cases where the model puts text before the JSON
     const balanced = this.extractBalancedJsonBlock(text);
     if (balanced) {
       result = tryParse(balanced);
@@ -331,7 +283,6 @@ export class GeminiService implements AIProvider {
     }
 
     // 5) Ultimate Fallback: Extract Markdown Code Blocks
-    // If the model completely failed to output JSON, but output markdown code blocks.
     const files: Record<string, string> = {};
     let foundFiles = false;
     
@@ -340,12 +291,10 @@ export class GeminiService implements AIProvider {
     for (let i = 1; i < parts.length; i++) {
         const codePart = parts[i].split('```')[0];
         if (codePart) {
-            // Try to find a filename in the text immediately preceding the code block
             const precedingText = parts[i-1].trim();
             const lines = precedingText.split('\n');
             const lastLine = lines[lines.length - 1].trim();
             
-            // Look for something that looks like a file path
             const fileMatch = lastLine.match(/([a-zA-Z0-9_.\-/]+\.[a-zA-Z0-9]+)/);
             const filename = fileMatch ? fileMatch[1] : `extracted_file_${i}.ts`;
             
@@ -363,11 +312,6 @@ export class GeminiService implements AIProvider {
 
     // If all else fails, throw the original error to trigger retry
     return JSON.parse(text);
-  }
-
-  private isLocalModel(modelName: string): boolean {
-    const name = modelName.toLowerCase();
-    return name.includes('local') || name.includes('llama') || name.includes('qwen') || name.includes('coder');
   }
 
   async callPhase(
@@ -397,10 +341,6 @@ export class GeminiService implements AIProvider {
       case 'uiux': 
         systemInstruction = `${BASE_ROLE}\n\n${STRICT_SCOPE_EDITING}\n\n${DESIGN_SYSTEM}\n\n${SURGICAL_EDITING}\n\n${PATCH_MODE_RULE}\n\n${UI_UX_PROMPT}\n\n${RESPONSE_FORMAT}`; 
         break;
-    }
-
-    if (this.isLocalModel(modelName)) {
-      return this.callPhaseWithOllama(modelName, systemInstruction, input);
     }
 
     const key = process.env.GEMINI_API_KEY || process.env.API_KEY;
@@ -433,40 +373,5 @@ export class GeminiService implements AIProvider {
       }
     }
     throw new Error(`Gemini API failed after ${retries} attempts: ${lastError?.message}`);
-  }
-
-  private async callPhaseWithOllama(model: string, system: string, prompt: string): Promise<any> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for local models
-
-    try {
-      const response = await fetch('http://127.0.0.1:11434/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: prompt }
-          ],
-          stream: false,
-          format: 'json'
-        }),
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-
-      if (!response.ok) throw new Error(`Ollama error: ${response.statusText}`);
-      const data = await response.json();
-      
-      let content = data.message.content;
-      // Sanitize markdown code blocks if present
-      content = content.replace(/^```json\s*/i, '').replace(/```\s*$/i, '');
-      return JSON.parse(content);
-    } catch (e: any) {
-      clearTimeout(timeoutId);
-      Logger.error("Phase call failed", e, { component: 'GeminiService', model, provider: 'Ollama' });
-      throw new Error(`Local model execution failed: ${e.message}. Ensure Ollama is running at http://127.0.0.1:11434 and OLLAMA_ORIGINS="*" is set.`);
-    }
   }
 }

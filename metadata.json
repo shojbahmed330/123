@@ -1,6 +1,6 @@
 {
-  "name": "SoulSpeak",
-  "description": "An anonymous voice confession platform where users can share their feelings and life struggles through short audio recordings in a safe, supportive space.",
+  "name": "OneClick Studion WOrking Now 15 march",
+  "description": "A mobile-friendly web application for SoulSpeak.",
   "requestFramePermissions": [
     "camera",
     "microphone",
