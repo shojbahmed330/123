@@ -228,6 +228,11 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!supabase) {
+      setLoading(false);
+      return;
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       setLoading(false);
@@ -243,6 +248,8 @@ export default function App() {
   }, []);
 
   const fetchConfessions = async () => {
+    if (!supabase) return;
+
     const { data, error } = await supabase
       .from('confessions')
       .select('*')
@@ -252,6 +259,7 @@ export default function App() {
   };
 
   const handleUpload = async (blob: Blob, title: string, mood: string, anon: boolean) => {
+    if (!supabase) return;
     if (!user) return alert("Please login to share.");
 
     const fileName = `${user.id}/${Date.now()}.webm`;
@@ -278,11 +286,30 @@ export default function App() {
   };
 
   const handleLogin = async () => {
+    if (!supabase) return;
     const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
     if (error) console.error(error);
   };
 
   if (loading) return <div className="h-screen bg-black flex items-center justify-center"><div className="w-8 h-8 border-4 border-pink-500/20 border-t-pink-500 rounded-full animate-spin"></div></div>;
+
+  if (!supabase) {
+    return (
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center space-y-6">
+        <div className="w-20 h-20 bg-red-500/20 rounded-3xl flex items-center justify-center text-red-500">
+          <Shield size={40} />
+        </div>
+        <h1 className="text-2xl font-black uppercase tracking-tighter">Configuration <span className="text-red-500">Required</span></h1>
+        <p className="text-zinc-500 text-sm max-w-xs uppercase font-bold tracking-widest leading-relaxed">
+          Please set your Supabase credentials in the environment variables to start using SoulSpeak.
+        </p>
+        <div className="bg-zinc-900 p-4 rounded-2xl border border-white/5 text-left w-full max-w-sm font-mono text-[10px] text-zinc-400">
+          VITE_SUPABASE_URL<br/>
+          VITE_SUPABASE_ANON_KEY
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-black text-zinc-300 pb-24">
@@ -297,7 +324,7 @@ export default function App() {
         {!user ? (
           <button onClick={handleLogin} className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">Login</button>
         ) : (
-          <button onClick={() => supabase.auth.signOut()} className="p-2 text-zinc-500 hover:text-white"><LogOut size={20} /></button>
+          <button onClick={() => supabase?.auth.signOut()} className="p-2 text-zinc-500 hover:text-white"><LogOut size={20} /></button>
         )}
       </header>
 
